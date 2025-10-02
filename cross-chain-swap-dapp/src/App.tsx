@@ -1,15 +1,11 @@
-import { useState } from 'react';
 import { WalletButton } from './components/WalletButton';
 import { SwapInterface } from './components/SwapInterface';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useWallet } from './hooks/useWallet';
 
 function App() {
-  const { isConnected, address, chainId } = useWallet();
-  const [forceShowSwap, setForceShowSwap] = useState(false);
+  const { isConnected } = useWallet();
   
-  // Debug logging
-  console.log('App render - isConnected:', isConnected, 'address:', address, 'chainId:', chainId, 'forceShowSwap:', forceShowSwap);
 
   return (
     <ErrorBoundary>
@@ -44,7 +40,7 @@ function App() {
           </p>
         </div>
 
-        {!isConnected && !forceShowSwap ? (
+        {!isConnected ? (
           <div className="max-w-md mx-auto">
             <div className="card text-center">
               <div className="mb-6">
@@ -62,47 +58,12 @@ function App() {
               </div>
               <WalletButton />
               
-              {/* Temporary debug button */}
-              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-sm text-yellow-800 mb-2">Debug: Force show swap interface</p>
-                <button 
-                  onClick={() => {
-                    console.log('Force showing swap interface');
-                    setForceShowSwap(true);
-                  }}
-                  className="btn-secondary text-xs"
-                >
-                  Show Swap Interface (Debug)
-                </button>
-              </div>
             </div>
           </div>
         ) : (
-          <div>
-            {isConnected && (
-              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                <p className="text-sm text-green-800">
-                  ✅ Wallet Connected: {address} (Chain: {chainId})
-                </p>
-              </div>
-            )}
-            {forceShowSwap && !isConnected && (
-              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-sm text-yellow-800">
-                  ⚠️ Debug Mode: Showing swap interface without wallet connection
-                </p>
-                <button 
-                  onClick={() => setForceShowSwap(false)}
-                  className="btn-secondary text-xs mt-2"
-                >
-                  Hide Swap Interface
-                </button>
-              </div>
-            )}
-            <ErrorBoundary>
-              <SwapInterface />
-            </ErrorBoundary>
-          </div>
+          <ErrorBoundary>
+            <SwapInterface />
+          </ErrorBoundary>
         )}
 
         {/* Features Section */}

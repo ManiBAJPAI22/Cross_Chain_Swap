@@ -13,51 +13,7 @@ import { useWallet } from '../hooks/useWallet';
 export const SwapInterface: React.FC = () => {
   const { isConnected, chainId, switchChain, provider, signer, address } = useWallet();
   
-  // Debug logging
-  console.log('SwapInterface render - isConnected:', isConnected, 'address:', address, 'chainId:', chainId);
   
-  // Test network connectivity
-  const [networkStatus, setNetworkStatus] = useState<'checking' | 'online' | 'offline'>('checking');
-  
-  useEffect(() => {
-    const checkNetwork = async () => {
-      try {
-        // Try multiple endpoints to check connectivity
-        const endpoints = [
-          'https://api.paraswap.io/delta/prices/bridge-info',
-          'https://api.paraswap.io/prices',
-          'https://api.paraswap.io/'
-        ];
-        
-        let isOnline = false;
-        for (const endpoint of endpoints) {
-          try {
-            const response = await fetch(endpoint, {
-              method: 'GET',
-              mode: 'cors',
-              headers: {
-                'Accept': 'application/json',
-              }
-            });
-            if (response.ok) {
-              console.log('API endpoint accessible:', endpoint);
-              isOnline = true;
-              break;
-            }
-          } catch (err) {
-            console.warn('Failed to reach endpoint:', endpoint, err);
-          }
-        }
-        
-        setNetworkStatus(isOnline ? 'online' : 'offline');
-      } catch (error) {
-        console.warn('Network check failed:', error);
-        setNetworkStatus('offline');
-      }
-    };
-    
-    checkNetwork();
-  }, []);
   
   // State
   const [srcChain, setSrcChain] = useState<Chain | null>(SUPPORTED_CHAINS[0]);
@@ -170,7 +126,7 @@ export const SwapInterface: React.FC = () => {
     try {
       await getQuote(swapParams);
     } catch (error) {
-      console.error('Failed to get quote:', error);
+      // Error handling is done in the hook
     } finally {
       setIsLoadingQuote(false);
     }
@@ -178,7 +134,6 @@ export const SwapInterface: React.FC = () => {
 
   const handleGetQuote = useCallback(async () => {
     if (!srcToken || !destToken || !srcChain || !destChain || !amount) {
-      console.log('Missing required fields for quote:', { srcToken, destToken, srcChain, destChain, amount });
       return;
     }
 
@@ -192,7 +147,6 @@ export const SwapInterface: React.FC = () => {
       recipient: recipient || undefined,
     };
 
-    console.log('Getting quote with params:', swapParams);
 
     // Clear existing timeout
     if (quoteTimeoutRef.current) {
@@ -305,60 +259,6 @@ export const SwapInterface: React.FC = () => {
           </div>
         )}
 
-        {/* Network Status */}
-        <div className="mb-4">
-          {networkStatus === 'checking' && (
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm text-blue-800">🔄 Checking network connectivity...</p>
-            </div>
-          )}
-          {networkStatus === 'online' && (
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <p className="text-sm text-green-800">✅ Network online - API accessible</p>
-            </div>
-          )}
-                 {networkStatus === 'offline' && (
-                   <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                     <p className="text-sm text-red-800">❌ Network offline - API not accessible</p>
-                     <div className="space-y-2">
-                       <button
-                        onClick={async () => {
-                          setNetworkStatus('checking');
-                          try {
-                            const response = await fetch('https://api.paraswap.io/delta/prices/bridge-info', {
-                              method: 'GET',
-                              mode: 'cors',
-                              headers: {
-                                'Accept': 'application/json',
-                              }
-                            });
-                            console.log('Direct API test response:', response.status, response.statusText);
-                            if (response.ok) {
-                              setNetworkStatus('online');
-                            } else {
-                              setNetworkStatus('offline');
-                            }
-                          } catch (error) {
-                            console.error('Direct API test failed:', error);
-                            setNetworkStatus('offline');
-                          }
-                        }}
-                         className="btn-secondary text-xs"
-                       >
-                         Retry API Connection
-                       </button>
-                       <div className="text-xs text-gray-600">
-                         <p>If this persists, try:</p>
-                         <ul className="list-disc list-inside mt-1 space-y-1">
-                           <li>Disable ad blockers</li>
-                           <li>Check browser console for CORS errors</li>
-                           <li>Try a different network</li>
-                         </ul>
-                       </div>
-                     </div>
-                   </div>
-                 )}
-        </div>
 
         {/* Token Loading State */}
         {isLoadingTokens && (

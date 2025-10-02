@@ -10,9 +10,6 @@ const axiosWrapper = {
   request: axios.request,
 };
 
-// Debug: Check if axios wrapper has the required methods
-console.log('Axios wrapper isAxiosError type:', typeof axiosWrapper.isAxiosError);
-console.log('Axios wrapper request type:', typeof axiosWrapper.request);
 
 interface UseVeloraSDKProps {
   chainId: number;
@@ -32,7 +29,7 @@ export const useVeloraSDK = ({ chainId, provider, signer, address }: UseVeloraSD
         { 
           chainId, 
           axios: axiosWrapper,
-          apiURL: 'https://api.paraswap.io' // Velora uses Paraswap API infrastructure
+          apiURL: '/api' // Use Vite proxy for CORS-free development
         },
         {
           ethersV6ProviderOrSigner: signer,
@@ -48,15 +45,7 @@ export const useVeloraSDK = ({ chainId, provider, signer, address }: UseVeloraSD
 
   const getBridgeInfo = async () => {
     if (!sdk) throw new Error('SDK not initialized');
-    try {
-      console.log('Getting bridge info...');
-      const result = await sdk.delta.getBridgeInfo();
-      console.log('Bridge info result:', result);
-      return result;
-    } catch (error) {
-      console.error('Error getting bridge info:', error);
-      throw error;
-    }
+    return sdk.delta.getBridgeInfo();
   };
 
   const getDeltaPrice = async (params: {
@@ -69,27 +58,7 @@ export const useVeloraSDK = ({ chainId, provider, signer, address }: UseVeloraSD
     destDecimals: number;
   }) => {
     if (!sdk) throw new Error('SDK not initialized');
-    try {
-      console.log('Getting delta price with params:', params);
-      console.log('Current chain ID:', chainId);
-      console.log('Destination chain ID:', params.destChainId);
-      
-      const result = await sdk.delta.getDeltaPrice(params);
-      console.log('Delta price result:', result);
-      return result;
-    } catch (error) {
-      console.error('Error getting delta price:', error);
-      console.error('Error details:', {
-        message: error instanceof Error ? error.message : String(error),
-        name: error instanceof Error ? error.name : 'Unknown',
-        stack: error instanceof Error ? error.stack : 'No stack',
-        chainId,
-        destChainId: params.destChainId,
-        srcToken: params.srcToken,
-        destToken: params.destToken
-      });
-      throw error;
-    }
+    return sdk.delta.getDeltaPrice(params);
   };
 
   const approveTokenForDelta = async (amount: string, tokenAddress: string) => {

@@ -40,15 +40,11 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
 
   const loadBridgeInfo = useCallback(async () => {
     try {
-      console.log('Loading bridge info...');
       const info = await getBridgeInfo();
       setBridgeInfo(info);
-      console.log('Bridge info loaded successfully:', info);
       return info;
     } catch (error) {
-      console.error('Failed to load bridge info:', error);
-      // Don't throw error, just log it and continue
-      console.log('Continuing without bridge info...');
+      // Don't throw error, just continue without bridge info
       return null;
     }
   }, [getBridgeInfo]);
@@ -63,15 +59,6 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
       
       const isCrossChain = params.srcChain.id !== params.destChain.id;
       
-      console.log('Attempting to get quote with params:', {
-        srcToken: params.srcToken.address,
-        destToken: params.destToken.address,
-        srcChain: params.srcChain.id,
-        destChain: params.destChain.id,
-        amount: params.amount,
-        isCrossChain,
-        retryAttempt
-      });
 
       let quoteResponse: QuoteResponse;
 
@@ -87,9 +74,7 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
           destDecimals: params.destToken.decimals,
         };
 
-        console.log('Getting cross-chain delta price with params:', deltaPriceParams);
         const bridgePrice = await getDeltaPrice(deltaPriceParams);
-        console.log('Raw bridge price response:', JSON.stringify(bridgePrice, null, 2));
         
         // BridgePrice has a different structure than DeltaPrice
         // Convert BridgePrice to our QuoteResponse format
@@ -116,9 +101,7 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
           mode: 'all' as const,
         };
 
-        console.log('Getting same-chain quote with params:', quoteParams);
         const rawQuote = await veloraSDK.getQuote(quoteParams);
-        console.log('Raw quote response:', JSON.stringify(rawQuote, null, 2));
         
         // Handle different response structures from getQuote
         if ('delta' in rawQuote) {
@@ -137,16 +120,11 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
         }
       }
       
-      console.log('Formatted quote response:', JSON.stringify(quoteResponse, null, 2));
       setQuote(quoteResponse);
       setSwapStatus({ status: 'idle', message: '' });
       setRetryCount(0);
       return quoteResponse;
     } catch (error) {
-      console.error('Error in getQuote:', error);
-      console.error('Error type:', typeof error);
-      console.error('Error constructor:', error?.constructor?.name);
-      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack');
       
       const errorObj = error instanceof Error ? error : new Error(String(error));
       setLastError(errorObj);
@@ -159,7 +137,6 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
         errorObj.message.includes('ECONNREFUSED') ||
         errorObj.message.includes('ENOTFOUND')
       )) {
-        console.log(`Retrying quote request in ${retryDelay}ms (attempt ${retryAttempt + 1}/${maxRetries})`);
         setRetryCount(retryAttempt + 1);
         
         setTimeout(() => {

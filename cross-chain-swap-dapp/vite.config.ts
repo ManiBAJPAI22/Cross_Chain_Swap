@@ -15,6 +15,20 @@ export default defineConfig({
   optimizeDeps: {
     include: ['buffer'],
   },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'https://api.paraswap.io',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            // Silently handle proxy errors
+          });
+        },
+      },
+    },
+  },
 })
 
 

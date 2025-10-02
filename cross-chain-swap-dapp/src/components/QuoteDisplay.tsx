@@ -40,9 +40,6 @@ export const QuoteDisplay: React.FC<QuoteDisplayProps> = ({
   // Use the raw amount for display (not wei)
   const displayAmount = amount || '0';
   
-  // Debug logging
-  console.log('QuoteDisplay - amount:', amount, 'displayAmount:', displayAmount, 'srcToken:', srcToken?.symbol);
-  console.log('QuoteDisplay - quote:', JSON.stringify(quote, null, 2));
 
   // Validate quote values
   const validateQuote = (quote: QuoteResponse) => {
@@ -51,7 +48,6 @@ export const QuoteDisplay: React.FC<QuoteDisplayProps> = ({
 
       // Only check if destAmount is 0 or negative
       if (destAmount <= 0) {
-        console.warn('Invalid destAmount:', destAmount);
         return { isValid: false, warning: 'Invalid quote - destination amount is zero or negative' };
       }
     }
