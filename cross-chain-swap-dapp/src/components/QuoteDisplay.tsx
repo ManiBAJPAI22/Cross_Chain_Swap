@@ -19,7 +19,6 @@ export const QuoteDisplay: React.FC<QuoteDisplayProps> = ({
   srcChain,
   destChain,
   amount,
-  srcAmountInWei,
 }) => {
   if (!quote || !srcToken || !destToken) {
     return null;
@@ -124,7 +123,7 @@ export const QuoteDisplay: React.FC<QuoteDisplayProps> = ({
             </span>
           </div>
 
-          {isCrossChain && quote.delta.bridgeInfo && (
+          {isCrossChain && 'bridgeInfo' in quote.delta && quote.delta.bridgeInfo && (
             <>
               <div className="border-t border-gray-200 pt-3">
                 <div className="flex items-center gap-2 mb-2">

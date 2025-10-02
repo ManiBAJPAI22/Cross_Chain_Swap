@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ArrowUpDown, Settings, RefreshCw } from 'lucide-react';
 import { Chain, Token, SwapParams } from '../types';
 import { SUPPORTED_CHAINS } from '../constants/chains';
-import { getTokensByChain } from '../constants/tokens';
+import { getSourceTokensByChain, getDestTokensByChain, isNativeToken } from '../constants/tokens';
 import { ChainSelector } from './ChainSelector';
 import { TokenSelector } from './TokenSelector';
 import { SwapStatus } from './SwapStatus';
@@ -68,15 +68,23 @@ export const SwapInterface: React.FC = () => {
   const [slippage, setSlippage] = useState(0.5);
   const [recipient, setRecipient] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [isLoadingQuote, setIsLoadingQuote] = useState(false);
+  
+  // Refs for debouncing
+  const quoteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastParamsRef = useRef<string>('');
 
   const {
     swapStatus,
     quote,
+    retryCount,
+    lastError,
     loadBridgeInfo,
     getQuote,
     executeSwap,
     monitorSwap,
     resetSwap,
+    retryQuote,
   } = useCrossChainSwap({
     chainId: chainId || 1,
     provider,
@@ -92,8 +100,8 @@ export const SwapInterface: React.FC = () => {
   // Auto-select first token when chain changes
   useEffect(() => {
     if (srcChain) {
-      const tokens = getTokensByChain(srcChain.id);
-      if (tokens.length > 0 && !srcToken) {
+      const tokens = getSourceTokensByChain(srcChain.id);
+      if (tokens.length > 0 && (!srcToken || isNativeToken(srcToken))) {
         setSrcToken(tokens[0]);
       }
     }
@@ -101,7 +109,7 @@ export const SwapInterface: React.FC = () => {
 
   useEffect(() => {
     if (destChain) {
-      const tokens = getTokensByChain(destChain.id);
+      const tokens = getDestTokensByChain(destChain.id);
       if (tokens.length > 0 && !destToken) {
         setDestToken(tokens[0]);
       }
@@ -124,7 +132,34 @@ export const SwapInterface: React.FC = () => {
     setDestToken(tempToken);
   };
 
-  const handleGetQuote = async () => {
+  // Debounced quote fetching
+  const debouncedGetQuote = useCallback(async (swapParams: SwapParams) => {
+    const paramsKey = JSON.stringify({
+      srcToken: swapParams.srcToken.address,
+      destToken: swapParams.destToken.address,
+      srcChain: swapParams.srcChain.id,
+      destChain: swapParams.destChain.id,
+      amount: swapParams.amount,
+    });
+
+    // Skip if same params
+    if (lastParamsRef.current === paramsKey) {
+      return;
+    }
+
+    lastParamsRef.current = paramsKey;
+    setIsLoadingQuote(true);
+
+    try {
+      await getQuote(swapParams);
+    } catch (error) {
+      console.error('Failed to get quote:', error);
+    } finally {
+      setIsLoadingQuote(false);
+    }
+  }, [getQuote]);
+
+  const handleGetQuote = useCallback(async () => {
     if (!srcToken || !destToken || !srcChain || !destChain || !amount) {
       console.log('Missing required fields for quote:', { srcToken, destToken, srcChain, destChain, amount });
       return;
@@ -142,12 +177,32 @@ export const SwapInterface: React.FC = () => {
 
     console.log('Getting quote with params:', swapParams);
 
-    try {
-      await getQuote(swapParams);
-    } catch (error) {
-      console.error('Failed to get quote:', error);
+    // Clear existing timeout
+    if (quoteTimeoutRef.current) {
+      clearTimeout(quoteTimeoutRef.current);
     }
-  };
+
+    // Debounce quote requests by 500ms
+    quoteTimeoutRef.current = setTimeout(() => {
+      debouncedGetQuote(swapParams);
+    }, 500);
+  }, [srcToken, destToken, srcChain, destChain, amount, slippage, recipient, debouncedGetQuote]);
+
+  // Auto-fetch quote when parameters change
+  useEffect(() => {
+    if (srcToken && destToken && srcChain && destChain && amount && parseFloat(amount) > 0) {
+      handleGetQuote();
+    }
+  }, [srcToken, destToken, srcChain, destChain, amount, handleGetQuote]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (quoteTimeoutRef.current) {
+        clearTimeout(quoteTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleExecuteSwap = async () => {
     if (!srcToken || !destToken || !srcChain || !destChain || !amount) {
@@ -184,7 +239,10 @@ export const SwapInterface: React.FC = () => {
     }
   };
 
-  const canExecuteSwap = isConnected && srcToken && destToken && srcChain && destChain && amount && quote;
+  // Check if current selection is valid for Delta protocol
+  const isNativeSourceToken = srcToken && isNativeToken(srcToken);
+  const isValidSelection = srcToken && destToken && srcChain && destChain && amount && !isNativeSourceToken;
+  const canExecuteSwap = isConnected && isValidSelection && quote;
 
   return (
     <div className="max-w-md mx-auto">
@@ -247,27 +305,27 @@ export const SwapInterface: React.FC = () => {
                      <p className="text-sm text-red-800">❌ Network offline - API not accessible</p>
                      <div className="space-y-2">
                        <button
-                         onClick={async () => {
-                           setNetworkStatus('checking');
-                           try {
-                             const response = await fetch('https://api.paraswap.io/delta/prices/bridge-info', {
-                               method: 'GET',
-                               mode: 'cors',
-                               headers: {
-                                 'Accept': 'application/json',
-                               }
-                             });
-                             console.log('Direct API test response:', response.status, response.statusText);
-                             if (response.ok) {
-                               setNetworkStatus('online');
-                             } else {
-                               setNetworkStatus('offline');
-                             }
-                           } catch (error) {
-                             console.error('Direct API test failed:', error);
-                             setNetworkStatus('offline');
-                           }
-                         }}
+                        onClick={async () => {
+                          setNetworkStatus('checking');
+                          try {
+                            const response = await fetch('https://api.paraswap.io/delta/prices/bridge-info', {
+                              method: 'GET',
+                              mode: 'cors',
+                              headers: {
+                                'Accept': 'application/json',
+                              }
+                            });
+                            console.log('Direct API test response:', response.status, response.statusText);
+                            if (response.ok) {
+                              setNetworkStatus('online');
+                            } else {
+                              setNetworkStatus('offline');
+                            }
+                          } catch (error) {
+                            console.error('Direct API test failed:', error);
+                            setNetworkStatus('offline');
+                          }
+                        }}
                          className="btn-secondary text-xs"
                        >
                          Retry API Connection
@@ -285,6 +343,21 @@ export const SwapInterface: React.FC = () => {
                  )}
         </div>
 
+        {/* Native Token Warning */}
+        {isNativeSourceToken && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <span className="text-sm font-medium text-red-800">Delta Protocol Limitation</span>
+            </div>
+            <p className="text-sm text-red-700 mt-1">
+              Native tokens (ETH, MATIC) cannot be used as source tokens in Delta protocol. Please select a different token like USDC, USDT, or DAI.
+            </p>
+          </div>
+        )}
+
         <div className="space-y-4">
           {/* Source Chain & Token */}
           <div className="space-y-3">
@@ -300,6 +373,7 @@ export const SwapInterface: React.FC = () => {
                   onTokenSelect={setSrcToken}
                   chainId={srcChain?.id || null}
                   label="Token"
+                  tokens={srcChain ? getSourceTokensByChain(srcChain.id) : []}
                 />
               </div>
               <div className="w-24">
@@ -341,6 +415,7 @@ export const SwapInterface: React.FC = () => {
               onTokenSelect={setDestToken}
               chainId={destChain?.id || null}
               label="Token"
+              tokens={destChain ? getDestTokensByChain(destChain.id) : []}
             />
           </div>
 
@@ -362,16 +437,24 @@ export const SwapInterface: React.FC = () => {
 
           {/* Action Buttons */}
           <div className="space-y-2">
-            {!quote ? (
+            {!quote && !isLoadingQuote ? (
               <button
                 onClick={handleGetQuote}
-                disabled={!srcToken || !destToken || !srcChain || !destChain || !amount || !isConnected}
+                disabled={!isValidSelection || !isConnected}
                 className="btn-primary w-full"
               >
                 <RefreshCw className="w-4 h-4 mr-2" />
                 Get Quote
               </button>
-            ) : (
+            ) : isLoadingQuote ? (
+              <button
+                disabled
+                className="btn-primary w-full opacity-50"
+              >
+                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                Getting Quote...
+              </button>
+            ) : quote ? (
               <button
                 onClick={handleExecuteSwap}
                 disabled={!canExecuteSwap || swapStatus.status === 'loading' || swapStatus.status === 'approving' || swapStatus.status === 'submitting' || swapStatus.status === 'executing'}
@@ -386,7 +469,7 @@ export const SwapInterface: React.FC = () => {
                   'Execute Swap'
                 )}
               </button>
-            )}
+            ) : null}
 
             {quote && (
               <button
@@ -394,6 +477,19 @@ export const SwapInterface: React.FC = () => {
                 className="btn-secondary w-full"
               >
                 Reset
+              </button>
+            )}
+
+            {lastError && !quote && (
+              <button
+                onClick={() => {
+                  retryQuote();
+                  handleGetQuote();
+                }}
+                className="btn-primary w-full"
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Retry Quote {retryCount > 0 && `(${retryCount} attempts)`}
               </button>
             )}
           </div>

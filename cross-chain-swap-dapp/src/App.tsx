@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { WalletButton } from './components/WalletButton';
 import { SwapInterface } from './components/SwapInterface';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { useWallet } from './hooks/useWallet';
 
 function App() {
@@ -97,7 +98,9 @@ function App() {
                 </button>
               </div>
             )}
-            <SwapInterface />
+            <ErrorBoundary>
+              <SwapInterface />
+            </ErrorBoundary>
           </div>
         )}
 

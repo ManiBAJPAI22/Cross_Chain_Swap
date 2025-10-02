@@ -9,6 +9,7 @@ interface TokenSelectorProps {
   chainId: number | null;
   disabled?: boolean;
   label: string;
+  tokens?: Token[];
 }
 
 export const TokenSelector: React.FC<TokenSelectorProps> = ({
@@ -17,11 +18,12 @@ export const TokenSelector: React.FC<TokenSelectorProps> = ({
   chainId,
   disabled = false,
   label,
+  tokens,
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
   const [searchTerm, setSearchTerm] = React.useState('');
 
-  const availableTokens = chainId ? getTokensByChain(chainId) : [];
+  const availableTokens = tokens || (chainId ? getTokensByChain(chainId) : []);
   const filteredTokens = availableTokens.filter(token =>
     token.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
     token.name.toLowerCase().includes(searchTerm.toLowerCase())

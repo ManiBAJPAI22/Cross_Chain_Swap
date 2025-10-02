@@ -102,6 +102,24 @@ export const getTokensByChain = (chainId: number): Token[] => {
   return POPULAR_TOKENS.filter(token => token.chainId === chainId);
 };
 
+// Get tokens that can be used as source tokens (excludes native tokens for Delta protocol)
+export const getSourceTokensByChain = (chainId: number): Token[] => {
+  return POPULAR_TOKENS.filter(token => 
+    token.chainId === chainId && 
+    token.address !== '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+  );
+};
+
+// Get tokens that can be used as destination tokens (includes all tokens)
+export const getDestTokensByChain = (chainId: number): Token[] => {
+  return POPULAR_TOKENS.filter(token => token.chainId === chainId);
+};
+
+// Check if a token is a native token (not supported as source in Delta)
+export const isNativeToken = (token: Token): boolean => {
+  return token.address === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+};
+
 export const getTokenByAddress = (address: string, chainId: number): Token | undefined => {
   return POPULAR_TOKENS.find(token => 
     token.address.toLowerCase() === address.toLowerCase() && token.chainId === chainId

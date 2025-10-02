@@ -16,6 +16,8 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
   });
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [bridgeInfo, setBridgeInfo] = useState<any>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [lastError, setLastError] = useState<Error | null>(null);
 
   const veloraSDK = useVeloraSDK({
     chainId,
@@ -41,74 +43,109 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
     }
   }, [getBridgeInfo]);
 
-  const getQuote = useCallback(async (params: SwapParams) => {
+  const getQuote = useCallback(async (params: SwapParams, retryAttempt = 0) => {
+    const maxRetries = 3;
+    const retryDelay = Math.min(1000 * Math.pow(2, retryAttempt), 5000); // Exponential backoff, max 5s
+    
     try {
-      setSwapStatus({ status: 'loading', message: 'Getting quote...' });
+      setSwapStatus({ status: 'loading', message: `Getting quote${retryAttempt > 0 ? ` (attempt ${retryAttempt + 1})` : ''}...` });
+      setLastError(null);
       
-      const quoteParams = {
+      const isCrossChain = params.srcChain.id !== params.destChain.id;
+      
+      console.log('Attempting to get quote with params:', {
         srcToken: params.srcToken.address,
         destToken: params.destToken.address,
-        destChainId: params.destChain.id,
+        srcChain: params.srcChain.id,
+        destChain: params.destChain.id,
         amount: params.amount,
-        userAddress: address!,
-        srcDecimals: params.srcToken.decimals,
-        destDecimals: params.destToken.decimals,
-      };
+        isCrossChain,
+        retryAttempt
+      });
 
-      console.log('Attempting to get quote with params:', quoteParams);
+      let quoteResponse: QuoteResponse;
 
-      const quoteResponse = await getDeltaPrice(quoteParams);
-      console.log('Raw API response from getDeltaPrice:', JSON.stringify(quoteResponse, null, 2));
-      
-      // Handle different possible response structures
-      let destAmount = '0';
-      let bridgeFee = '0';
-      let bridgeInfo = {
-        destAmountAfterBridge: '0',
-        fees: [] as Array<{ amount: string; amountInUSD: string; }>
-      };
-
-      // Check if response has destAmount directly
-      if (quoteResponse.destAmount) {
-        destAmount = quoteResponse.destAmount;
-      } else if (quoteResponse.delta?.destAmount) {
-        destAmount = quoteResponse.delta.destAmount;
-      }
-
-      // Check for bridge info and fees
-      if (quoteResponse.bridgeInfo) {
-        bridgeInfo = {
-          destAmountAfterBridge: quoteResponse.bridgeInfo.destAmountAfterBridge || destAmount,
-          fees: quoteResponse.bridgeInfo.fees || []
+      if (isCrossChain) {
+        // For cross-chain swaps, use getDeltaPrice with destChainId
+        const deltaPriceParams = {
+          srcToken: params.srcToken.address,
+          destToken: params.destToken.address,
+          destChainId: params.destChain.id,
+          amount: params.amount,
+          userAddress: address!,
+          srcDecimals: params.srcToken.decimals,
+          destDecimals: params.destToken.decimals,
         };
-        bridgeFee = bridgeInfo.fees[0]?.amount || '0';
-      } else if (quoteResponse.delta?.bridgeInfo) {
-        bridgeInfo = {
-          destAmountAfterBridge: quoteResponse.delta.bridgeInfo.destAmountAfterBridge || destAmount,
-          fees: quoteResponse.delta.bridgeInfo.fees || []
-        };
-        bridgeFee = bridgeInfo.fees[0]?.amount || '0';
-      }
 
-      // Convert BridgePrice to QuoteResponse format
-      const formattedQuote: QuoteResponse = {
-        delta: {
-          destAmount,
-          bridgeFee,
-          bridgeInfo
-        }
-      };
+        console.log('Getting cross-chain delta price with params:', deltaPriceParams);
+        const deltaPrice = await getDeltaPrice(deltaPriceParams);
+        console.log('Raw delta price response:', JSON.stringify(deltaPrice, null, 2));
+        
+        quoteResponse = {
+          delta: deltaPrice,
+          deltaAddress: ''
+        };
+      } else {
+        // For same-chain swaps, use getQuote with 'all' mode
+        const quoteParams = {
+          srcToken: params.srcToken.address,
+          destToken: params.destToken.address,
+          amount: params.amount,
+          userAddress: address!,
+          srcDecimals: params.srcToken.decimals,
+          destDecimals: params.destToken.decimals,
+          mode: 'all' as const,
+        };
+
+        console.log('Getting same-chain quote with params:', quoteParams);
+        quoteResponse = await veloraSDK.getQuote(quoteParams);
+        console.log('Raw quote response:', JSON.stringify(quoteResponse, null, 2));
+      }
       
-      console.log('Formatted quote:', JSON.stringify(formattedQuote, null, 2));
-      setQuote(formattedQuote);
+      console.log('Formatted quote response:', JSON.stringify(quoteResponse, null, 2));
+      setQuote(quoteResponse);
       setSwapStatus({ status: 'idle', message: '' });
-      return formattedQuote;
+      setRetryCount(0);
+      return quoteResponse;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to get quote';
+      console.error('Error in getQuote:', error);
+      console.error('Error type:', typeof error);
+      console.error('Error constructor:', error?.constructor?.name);
+      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack');
+      
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      setLastError(errorObj);
+      
+      // Retry logic for network errors
+      if (retryAttempt < maxRetries && (
+        errorObj.message.includes('network') ||
+        errorObj.message.includes('timeout') ||
+        errorObj.message.includes('fetch') ||
+        errorObj.message.includes('ECONNREFUSED') ||
+        errorObj.message.includes('ENOTFOUND')
+      )) {
+        console.log(`Retrying quote request in ${retryDelay}ms (attempt ${retryAttempt + 1}/${maxRetries})`);
+        setRetryCount(retryAttempt + 1);
+        
+        setTimeout(() => {
+          getQuote(params, retryAttempt + 1);
+        }, retryDelay);
+        return;
+      }
+      
+      let errorMessage = 'Failed to get quote';
+      if (errorObj.message) {
+        errorMessage = errorObj.message;
+      }
+      
+      if (retryAttempt > 0) {
+        errorMessage += ` (after ${retryAttempt + 1} attempts)`;
+      }
+      
       setSwapStatus({ status: 'failed', message: errorMessage });
-      throw error;
+      throw errorObj;
     }
-  }, [getDeltaPrice, address]);
+  }, [getDeltaPrice, veloraSDK, address]);
 
   const executeSwap = useCallback(async (params: SwapParams) => {
     try {
@@ -117,7 +154,7 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
       // Get quote first
       const quoteResponse = await getQuote(params);
       
-      if (!quoteResponse.delta) {
+      if (!quoteResponse?.delta) {
         throw new Error('Delta quote not available');
       }
 
@@ -131,8 +168,9 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
 
       // Calculate destination amount with slippage
       const slippageMultiplier = (100 - params.slippage) / 100;
+      const destAmount = quoteResponse?.delta?.destAmount || '0';
       const destAmountAfterSlippage = Math.floor(
-        parseFloat(quoteResponse.delta.destAmount) * slippageMultiplier
+        parseFloat(destAmount) * slippageMultiplier
       ).toString();
 
       // Submit delta order
@@ -215,16 +253,28 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
   const resetSwap = useCallback(() => {
     setSwapStatus({ status: 'idle', message: '' });
     setQuote(null);
+    setRetryCount(0);
+    setLastError(null);
   }, []);
+
+  const retryQuote = useCallback(() => {
+    if (lastError) {
+      setRetryCount(0);
+      setLastError(null);
+    }
+  }, [lastError]);
 
   return {
     swapStatus,
     quote,
     bridgeInfo,
+    retryCount,
+    lastError,
     loadBridgeInfo,
     getQuote,
     executeSwap,
     monitorSwap,
     resetSwap,
+    retryQuote,
   };
 };
