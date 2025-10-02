@@ -26,7 +26,17 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
     address,
   });
 
-  const { getBridgeInfo, getDeltaPrice, approveTokenForDelta, submitDeltaOrder, getDeltaOrderById } = veloraSDK;
+  const { 
+    getBridgeInfo, 
+    getDeltaPrice, 
+    approveTokenForDelta, 
+    buildDeltaOrder,
+    signDeltaOrder,
+    postDeltaOrder,
+    getPartnerFee,
+    isTokenSupportedInDelta,
+    getDeltaOrderById 
+  } = veloraSDK;
 
   const loadBridgeInfo = useCallback(async () => {
     try {
@@ -78,11 +88,20 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
         };
 
         console.log('Getting cross-chain delta price with params:', deltaPriceParams);
-        const deltaPrice = await getDeltaPrice(deltaPriceParams);
-        console.log('Raw delta price response:', JSON.stringify(deltaPrice, null, 2));
+        const bridgePrice = await getDeltaPrice(deltaPriceParams);
+        console.log('Raw bridge price response:', JSON.stringify(bridgePrice, null, 2));
         
+        // BridgePrice has a different structure than DeltaPrice
+        // Convert BridgePrice to our QuoteResponse format
         quoteResponse = {
-          delta: deltaPrice,
+          delta: {
+            destAmount: bridgePrice.destAmount,
+            bridgeFee: bridgePrice.bridgeInfo?.fees?.[0]?.amount || '0',
+            bridgeInfo: bridgePrice.bridgeInfo || {
+              destAmountAfterBridge: bridgePrice.destAmount,
+              fees: []
+            }
+          },
           deltaAddress: ''
         };
       } else {
@@ -98,8 +117,24 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
         };
 
         console.log('Getting same-chain quote with params:', quoteParams);
-        quoteResponse = await veloraSDK.getQuote(quoteParams);
-        console.log('Raw quote response:', JSON.stringify(quoteResponse, null, 2));
+        const rawQuote = await veloraSDK.getQuote(quoteParams);
+        console.log('Raw quote response:', JSON.stringify(rawQuote, null, 2));
+        
+        // Handle different response structures from getQuote
+        if ('delta' in rawQuote) {
+          quoteResponse = {
+            delta: rawQuote.delta,
+            deltaAddress: ''
+          };
+        } else if ('market' in rawQuote) {
+          quoteResponse = {
+            market: rawQuote.market,
+            fallbackReason: 'fallbackReason' in rawQuote ? rawQuote.fallbackReason : undefined
+          };
+        } else {
+          // Fallback for unexpected structure
+          quoteResponse = rawQuote as QuoteResponse;
+        }
       }
       
       console.log('Formatted quote response:', JSON.stringify(quoteResponse, null, 2));
@@ -160,10 +195,14 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
 
       // Approve token
       setSwapStatus({ status: 'approving', message: 'Approving token...' });
-      const approveTx = await approveTokenForDelta(params.amount, params.srcToken.address);
+      const approveTxHash = await approveTokenForDelta(params.amount, params.srcToken.address);
+      
       // Wait for transaction confirmation
-      if (approveTx && typeof approveTx === 'object' && 'wait' in approveTx) {
-        await (approveTx as any).wait();
+      setSwapStatus({ status: 'approving', message: 'Waiting for approval confirmation...' });
+      const receipt = await provider.waitForTransaction(approveTxHash);
+      
+      if (receipt.status === 0) {
+        throw new Error('Token approval failed');
       }
 
       // Calculate destination amount with slippage
@@ -173,19 +212,56 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
         parseFloat(destAmount) * slippageMultiplier
       ).toString();
 
-      // Submit delta order
-      setSwapStatus({ status: 'submitting', message: 'Submitting cross-chain order...' });
-      const deltaAuction = await submitDeltaOrder({
-        deltaPrice: quoteResponse.delta,
-        owner: address!,
-        srcToken: params.srcToken.address,
-        destToken: params.destToken.address,
-        srcAmount: params.amount,
-        destAmount: destAmountAfterSlippage,
-        destChainId: params.destChain.id,
-        beneficiary: params.recipient || address!,
-        beneficiaryType: 'EOA',
-      });
+      // Build and submit delta order using correct SDK flow
+      setSwapStatus({ status: 'submitting', message: 'Building Delta order...' });
+      
+      const isCrossChain = params.srcChain.id !== params.destChain.id;
+      let deltaAuction;
+      
+      if (isCrossChain) {
+        // For cross-chain swaps, use buildDeltaOrder with destChainId
+        const orderData = await buildDeltaOrder({
+          deltaPrice: quoteResponse.delta,
+          owner: address!,
+          srcToken: params.srcToken.address,
+          destToken: params.destToken.address,
+          srcAmount: params.amount,
+          destAmount: destAmountAfterSlippage,
+          destChainId: params.destChain.id,
+          beneficiary: params.recipient || address!,
+          beneficiaryType: 'EOA',
+        });
+        
+        setSwapStatus({ status: 'submitting', message: 'Signing Delta order...' });
+        const signature = await signDeltaOrder(orderData);
+        
+        setSwapStatus({ status: 'submitting', message: 'Submitting cross-chain order...' });
+        deltaAuction = await postDeltaOrder({
+          orderData,
+          signature,
+        });
+      } else {
+        // For same-chain swaps, use buildDeltaOrder
+        const orderData = await buildDeltaOrder({
+          deltaPrice: quoteResponse.delta,
+          owner: address!,
+          srcToken: params.srcToken.address,
+          destToken: params.destToken.address,
+          srcAmount: params.amount,
+          destAmount: destAmountAfterSlippage,
+          beneficiary: params.recipient || address!,
+          beneficiaryType: 'EOA',
+        });
+        
+        setSwapStatus({ status: 'submitting', message: 'Signing Delta order...' });
+        const signature = await signDeltaOrder(orderData);
+        
+        setSwapStatus({ status: 'submitting', message: 'Submitting order...' });
+        deltaAuction = await postDeltaOrder({
+          orderData,
+          signature,
+        });
+      }
 
       setSwapStatus({
         status: 'executing',
@@ -199,7 +275,7 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
       setSwapStatus({ status: 'failed', message: errorMessage });
       throw error;
     }
-  }, [getQuote, approveTokenForDelta, submitDeltaOrder, address]);
+  }, [getQuote, approveTokenForDelta, buildDeltaOrder, signDeltaOrder, postDeltaOrder, address, provider]);
 
   const monitorSwap = useCallback(async (auctionId: string) => {
     try {
@@ -261,8 +337,39 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
     if (lastError) {
       setRetryCount(0);
       setLastError(null);
+      setSwapStatus({ status: 'loading', message: 'Retrying quote...' });
     }
   }, [lastError]);
+
+  const checkTokenSupport = useCallback(async (tokenAddress: string) => {
+    try {
+      return await isTokenSupportedInDelta(tokenAddress);
+    } catch (error) {
+      console.error('Error checking token support:', error);
+      return false;
+    }
+  }, [isTokenSupportedInDelta]);
+
+  const getPartnerFeeInfo = useCallback(async (partner: string) => {
+    try {
+      return await getPartnerFee(partner);
+    } catch (error) {
+      console.error('Error getting partner fee:', error);
+      return null;
+    }
+  }, [getPartnerFee]);
+
+  const cancelOrder = useCallback(async () => {
+    try {
+      setSwapStatus({ status: 'loading', message: 'Cancelling order...' });
+      // Note: This would need the signature from the original order
+      // For now, we'll just show the status
+      setSwapStatus({ status: 'failed', message: 'Order cancellation requires signature' });
+    } catch (error) {
+      console.error('Error cancelling order:', error);
+      setSwapStatus({ status: 'failed', message: 'Failed to cancel order' });
+    }
+  }, []);
 
   return {
     swapStatus,
@@ -276,5 +383,8 @@ export const useCrossChainSwap = ({ chainId, provider, signer, address }: UseCro
     monitorSwap,
     resetSwap,
     retryQuote,
+    checkTokenSupport,
+    getPartnerFeeInfo,
+    cancelOrder,
   };
 };

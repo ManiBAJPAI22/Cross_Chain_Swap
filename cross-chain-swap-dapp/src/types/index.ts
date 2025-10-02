@@ -108,7 +108,17 @@ export interface BridgePrice extends Omit<DeltaPrice, 'bridge'> {
 }
 
 export interface QuoteResponse {
-  delta?: DeltaPrice | BridgePrice;
+  delta?: {
+    destAmount: string;
+    bridgeFee?: string;
+    bridgeInfo?: {
+      destAmountAfterBridge: string;
+      fees: Array<{
+        amount: string;
+        amountInUSD?: string;
+      }>;
+    };
+  };
   deltaAddress?: string;
   market?: {
     destAmount: string;

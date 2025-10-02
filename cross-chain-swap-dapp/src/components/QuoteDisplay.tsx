@@ -47,20 +47,9 @@ export const QuoteDisplay: React.FC<QuoteDisplayProps> = ({
   // Validate quote values
   const validateQuote = (quote: QuoteResponse) => {
     if (quote.delta) {
-      const destAmount = parseFloat(quote.delta.destAmount);
-      const srcAmount = parseFloat(amount || '0');
-      
-      // Check if destAmount is unreasonably large (more than 1000x the source amount)
-      if (destAmount > srcAmount * 1000) {
-        console.warn('Suspicious destAmount detected:', {
-          srcAmount,
-          destAmount,
-          ratio: destAmount / srcAmount
-        });
-        return { isValid: false, warning: 'Suspicious quote detected - please verify the amount' };
-      }
-      
-      // Check if destAmount is 0 or negative
+      const destAmount = parseFloat(quote.delta.destAmount || '0');
+
+      // Only check if destAmount is 0 or negative
       if (destAmount <= 0) {
         console.warn('Invalid destAmount:', destAmount);
         return { isValid: false, warning: 'Invalid quote - destination amount is zero or negative' };
@@ -105,45 +94,45 @@ export const QuoteDisplay: React.FC<QuoteDisplayProps> = ({
 
       {quote.delta ? (
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-600">You send</span>
-            <span className="font-medium">
-              {displayAmount} {srcToken.symbol}
-            </span>
-          </div>
+                 <div className="flex items-center justify-between">
+                   <span className="text-sm text-gray-600">You send</span>
+                   <span className="font-medium">
+                     {displayAmount} {srcToken.symbol}
+                   </span>
+                 </div>
 
-          <div className="flex items-center justify-center">
-            <ArrowRight className="w-4 h-4 text-gray-400" />
-          </div>
+                 <div className="flex items-center justify-center">
+                   <ArrowRight className="w-4 h-4 text-gray-400" />
+                 </div>
 
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-600">You receive</span>
-            <span className="font-medium">
-              {formatAmount(quote.delta.destAmount, destToken.decimals)} {destToken.symbol}
-            </span>
-          </div>
+                 <div className="flex items-center justify-between">
+                   <span className="text-sm text-gray-600">You receive</span>
+                   <span className="font-medium">
+                     {formatAmount(quote.delta.destAmount || '0', destToken.decimals)} {destToken.symbol}
+                   </span>
+                 </div>
 
-          {isCrossChain && 'bridgeInfo' in quote.delta && quote.delta.bridgeInfo && (
+          {isCrossChain && quote.delta.bridgeInfo && (
             <>
               <div className="border-t border-gray-200 pt-3">
                 <div className="flex items-center gap-2 mb-2">
                   <Info className="w-4 h-4 text-blue-500" />
                   <span className="text-sm font-medium text-gray-700">Bridge Details</span>
                 </div>
-                
+
                 <div className="space-y-2 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-gray-600">After bridge</span>
                     <span>
-                      {formatAmount(quote.delta.bridgeInfo.destAmountAfterBridge, destToken.decimals)} {destToken.symbol}
+                      {formatAmount(quote.delta.bridgeInfo.destAmountAfterBridge || quote.delta.destAmount || '0', destToken.decimals)} {destToken.symbol}
                     </span>
                   </div>
-                  
-                  {quote.delta.bridgeInfo.fees.map((fee, index) => (
+
+                  {quote.delta.bridgeInfo.fees && quote.delta.bridgeInfo.fees.length > 0 && quote.delta.bridgeInfo.fees.map((fee, index) => (
                     <div key={index} className="flex items-center justify-between">
                       <span className="text-gray-600">Bridge fee</span>
                       <span>
-                        {formatAmount(fee.amount, destToken.decimals)} {destToken.symbol}
+                        {formatAmount(fee.amount || '0', destToken.decimals)} {destToken.symbol}
                         {fee.amountInUSD && (
                           <span className="text-gray-500 ml-1">
                             (${parseFloat(fee.amountInUSD).toFixed(2)})

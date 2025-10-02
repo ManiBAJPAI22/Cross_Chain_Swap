@@ -35,8 +35,8 @@ export const useVeloraSDK = ({ chainId, provider, signer, address }: UseVeloraSD
           apiURL: 'https://api.paraswap.io' // Velora uses Paraswap API infrastructure
         },
         {
-          ethersProviderOrSigner: signer,
-          EthersContract: ethers.Contract,
+          ethersV6ProviderOrSigner: signer,
+          EthersV6Contract: ethers.Contract,
           account: address,
         }
       );
@@ -97,20 +97,19 @@ export const useVeloraSDK = ({ chainId, provider, signer, address }: UseVeloraSD
     return sdk.delta.approveTokenForDelta(amount, tokenAddress);
   };
 
-  const submitDeltaOrder = async (params: {
+  const buildDeltaOrder = async (params: {
     deltaPrice: any;
     owner: string;
     srcToken: string;
     destToken: string;
     srcAmount: string;
     destAmount: string;
-    destChainId: number;
+    destChainId?: number;
     beneficiary?: string;
-    beneficiaryType?: 'EOA' | 'CONTRACT';
+    beneficiaryType?: 'EOA' | 'SmartContract';
   }) => {
     if (!sdk) throw new Error('SDK not initialized');
-    // Use the correct parameter structure for submitDeltaOrder
-    return sdk.delta.submitDeltaOrder({
+    return sdk.delta.buildDeltaOrder({
       deltaPrice: params.deltaPrice,
       owner: params.owner,
       srcToken: params.srcToken,
@@ -119,8 +118,42 @@ export const useVeloraSDK = ({ chainId, provider, signer, address }: UseVeloraSD
       destAmount: params.destAmount,
       destChainId: params.destChainId,
       beneficiary: params.beneficiary,
-      beneficiaryType: params.beneficiaryType as any, // Type assertion to bypass type mismatch
+      beneficiaryType: params.beneficiaryType || 'EOA',
     });
+  };
+
+  const signDeltaOrder = async (orderData: any) => {
+    if (!sdk) throw new Error('SDK not initialized');
+    return sdk.delta.signDeltaOrder(orderData);
+  };
+
+  const postDeltaOrder = async (params: {
+    orderData: any;
+    signature: string;
+  }) => {
+    if (!sdk) throw new Error('SDK not initialized');
+    return sdk.delta.postDeltaOrder({
+      ...params.orderData,
+      signature: params.signature,
+    });
+  };
+
+
+  const getPartnerFee = async (partner: string) => {
+    if (!sdk) throw new Error('SDK not initialized');
+    return sdk.delta.getPartnerFee({ partner });
+  };
+
+  const isTokenSupportedInDelta = async (tokenAddress: string) => {
+    if (!sdk) throw new Error('SDK not initialized');
+    return sdk.delta.isTokenSupportedInDelta(tokenAddress);
+  };
+
+  const cancelDeltaOrder = async () => {
+    if (!sdk) throw new Error('SDK not initialized');
+    // Note: cancelDeltaOrder might not be available in the current SDK version
+    // We'll implement a placeholder for now
+    throw new Error('Order cancellation not implemented in current SDK version');
   };
 
   const getDeltaOrderById = async (auctionId: string) => {
@@ -146,7 +179,12 @@ export const useVeloraSDK = ({ chainId, provider, signer, address }: UseVeloraSD
     getBridgeInfo,
     getDeltaPrice,
     approveTokenForDelta,
-    submitDeltaOrder,
+    buildDeltaOrder,
+    signDeltaOrder,
+    postDeltaOrder,
+    getPartnerFee,
+    isTokenSupportedInDelta,
+    cancelDeltaOrder,
     getDeltaOrderById,
     getQuote,
   };

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ArrowUpDown, Settings, RefreshCw } from 'lucide-react';
 import { Chain, Token, SwapParams } from '../types';
 import { SUPPORTED_CHAINS } from '../constants/chains';
-import { getSourceTokensByChain, getDestTokensByChain, isNativeToken } from '../constants/tokens';
+import { useTokens } from '../hooks/useTokens';
 import { ChainSelector } from './ChainSelector';
 import { TokenSelector } from './TokenSelector';
 import { SwapStatus } from './SwapStatus';
@@ -74,6 +74,15 @@ export const SwapInterface: React.FC = () => {
   const quoteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastParamsRef = useRef<string>('');
 
+  // Load tokens for the current chain
+  const {
+    sourceTokens: srcChainTokens,
+    destTokens: destChainTokens,
+    isLoading: isLoadingTokens,
+    error: tokenError,
+    isNativeToken,
+  } = useTokens({ chainId: chainId || 1 });
+
   const {
     swapStatus,
     quote,
@@ -99,22 +108,30 @@ export const SwapInterface: React.FC = () => {
 
   // Auto-select first token when chain changes
   useEffect(() => {
-    if (srcChain) {
-      const tokens = getSourceTokensByChain(srcChain.id);
-      if (tokens.length > 0 && (!srcToken || isNativeToken(srcToken))) {
-        setSrcToken(tokens[0]);
+    if (srcChain && srcChainTokens.length > 0) {
+      // Only auto-select if no token is selected or if current token is not available on new chain
+      const currentTokenAvailable = srcToken && srcChainTokens.some(t => t.address === srcToken.address);
+      if (!srcToken || !currentTokenAvailable || isNativeToken(srcToken)) {
+        setSrcToken(srcChainTokens[0]);
       }
+    } else if (srcChain && srcChainTokens.length === 0) {
+      // Clear token if no tokens available for the chain
+      setSrcToken(null);
     }
-  }, [srcChain, srcToken]);
+  }, [srcChain, srcChainTokens, srcToken, isNativeToken]);
 
   useEffect(() => {
-    if (destChain) {
-      const tokens = getDestTokensByChain(destChain.id);
-      if (tokens.length > 0 && !destToken) {
-        setDestToken(tokens[0]);
+    if (destChain && destChainTokens.length > 0) {
+      // Only auto-select if no token is selected or if current token is not available on new chain
+      const currentTokenAvailable = destToken && destChainTokens.some(t => t.address === destToken.address);
+      if (!destToken || !currentTokenAvailable) {
+        setDestToken(destChainTokens[0]);
       }
+    } else if (destChain && destChainTokens.length === 0) {
+      // Clear token if no tokens available for the chain
+      setDestToken(null);
     }
-  }, [destChain, destToken]);
+  }, [destChain, destChainTokens, destToken]);
 
   // Switch to source chain when needed
   useEffect(() => {
@@ -241,7 +258,7 @@ export const SwapInterface: React.FC = () => {
 
   // Check if current selection is valid for Delta protocol
   const isNativeSourceToken = srcToken && isNativeToken(srcToken);
-  const isValidSelection = srcToken && destToken && srcChain && destChain && amount && !isNativeSourceToken;
+  const isValidSelection = srcToken && destToken && srcChain && destChain && amount && !isNativeSourceToken && !isLoadingTokens;
   const canExecuteSwap = isConnected && isValidSelection && quote;
 
   return (
@@ -343,6 +360,34 @@ export const SwapInterface: React.FC = () => {
                  )}
         </div>
 
+        {/* Token Loading State */}
+        {isLoadingTokens && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-center gap-2">
+              <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
+              <span className="text-sm font-medium text-blue-800">Loading tokens...</span>
+            </div>
+            <p className="text-sm text-blue-700 mt-1">
+              Fetching the latest token list from Velora API...
+            </p>
+          </div>
+        )}
+
+        {/* Token Loading Error */}
+        {tokenError && (
+          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <span className="text-sm font-medium text-yellow-800">Token Loading Warning</span>
+            </div>
+            <p className="text-sm text-yellow-700 mt-1">
+              {tokenError}. Using fallback token list.
+            </p>
+          </div>
+        )}
+
         {/* Native Token Warning */}
         {isNativeSourceToken && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
@@ -368,13 +413,31 @@ export const SwapInterface: React.FC = () => {
             />
             <div className="flex gap-2">
               <div className="flex-1">
-                <TokenSelector
-                  selectedToken={srcToken}
-                  onTokenSelect={setSrcToken}
-                  chainId={srcChain?.id || null}
-                  label="Token"
-                  tokens={srcChain ? getSourceTokensByChain(srcChain.id) : []}
-                />
+                {isLoadingTokens ? (
+                  <div className="flex items-center justify-center p-3 border border-gray-300 rounded-lg bg-gray-50">
+                    <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                    <span className="text-sm text-gray-600">Loading tokens...</span>
+                  </div>
+                ) : tokenError ? (
+                  <div className="p-3 border border-red-200 rounded-lg bg-red-50">
+                    <p className="text-sm text-red-600">Failed to load tokens: {tokenError}</p>
+                    <button
+                      onClick={() => window.location.reload()}
+                      className="mt-2 text-xs text-red-600 hover:text-red-800 underline"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <TokenSelector
+                    selectedToken={srcToken}
+                    onTokenSelect={setSrcToken}
+                    chainId={srcChain?.id || null}
+                    label="Token"
+                    tokens={srcChainTokens}
+                    disabled={isLoadingTokens}
+                  />
+                )}
               </div>
               <div className="w-24">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -410,13 +473,31 @@ export const SwapInterface: React.FC = () => {
               onChainSelect={setDestChain}
               label="To Chain"
             />
-            <TokenSelector
-              selectedToken={destToken}
-              onTokenSelect={setDestToken}
-              chainId={destChain?.id || null}
-              label="Token"
-              tokens={destChain ? getDestTokensByChain(destChain.id) : []}
-            />
+            {isLoadingTokens ? (
+              <div className="flex items-center justify-center p-3 border border-gray-300 rounded-lg bg-gray-50">
+                <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                <span className="text-sm text-gray-600">Loading tokens...</span>
+              </div>
+            ) : tokenError ? (
+              <div className="p-3 border border-red-200 rounded-lg bg-red-50">
+                <p className="text-sm text-red-600">Failed to load tokens: {tokenError}</p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="mt-2 text-xs text-red-600 hover:text-red-800 underline"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : (
+              <TokenSelector
+                selectedToken={destToken}
+                onTokenSelect={setDestToken}
+                chainId={destChain?.id || null}
+                label="Token"
+                tokens={destChainTokens}
+                disabled={isLoadingTokens}
+              />
+            )}
           </div>
 
           {/* Quote Display */}
