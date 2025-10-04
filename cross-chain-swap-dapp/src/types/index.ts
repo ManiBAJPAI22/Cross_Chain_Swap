@@ -14,6 +14,11 @@ export interface Chain {
   rpcUrl: string;
   blockExplorer: string;
   logoURI?: string;
+  nativeCurrency?: {
+    name: string;
+    symbol: string;
+    decimals: number;
+  };
 }
 
 export interface SwapParams {

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ArrowUpDown, Settings, RefreshCw } from 'lucide-react';
 import { Chain, Token, SwapParams } from '../types';
-import { SUPPORTED_CHAINS } from '../constants/chains';
+import { VELORA_SUPPORTED_CHAINS } from '../constants/chains';
+import { ChainService } from '../services/chainService';
 import { useTokens } from '../hooks/useTokens';
 import { ChainSelector } from './ChainSelector';
 import { TokenSelector } from './TokenSelector';
@@ -16,8 +17,8 @@ export const SwapInterface: React.FC = () => {
   
   
   // State
-  const [srcChain, setSrcChain] = useState<Chain | null>(SUPPORTED_CHAINS[0]);
-  const [destChain, setDestChain] = useState<Chain | null>(SUPPORTED_CHAINS[1]);
+  const [srcChain, setSrcChain] = useState<Chain | null>(null);
+  const [destChain, setDestChain] = useState<Chain | null>(null);
   const [srcToken, setSrcToken] = useState<Token | null>(null);
   const [destToken, setDestToken] = useState<Token | null>(null);
   const [amount, setAmount] = useState('');
@@ -30,14 +31,20 @@ export const SwapInterface: React.FC = () => {
   const quoteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastParamsRef = useRef<string>('');
 
-  // Load tokens for the current chain
+  // Load tokens for source chain
   const {
     sourceTokens: srcChainTokens,
-    destTokens: destChainTokens,
-    isLoading: isLoadingTokens,
-    error: tokenError,
+    isLoading: isLoadingSrcTokens,
+    error: srcTokenError,
     isNativeToken,
-  } = useTokens({ chainId: chainId || 1 });
+  } = useTokens({ chainId: srcChain?.id || null });
+
+  // Load tokens for destination chain
+  const {
+    destTokens: destChainTokens,
+    isLoading: isLoadingDestTokens,
+    error: destTokenError,
+  } = useTokens({ chainId: destChain?.id || null });
 
   const {
     swapStatus,
@@ -56,6 +63,15 @@ export const SwapInterface: React.FC = () => {
     signer,
     address,
   });
+
+  // Initialize with popular chains if none selected
+  useEffect(() => {
+    if (!srcChain && !destChain) {
+      const popularChains = ChainService.getPopularChains();
+      setSrcChain(popularChains[0] || VELORA_SUPPORTED_CHAINS[0]);
+      setDestChain(popularChains[1] || VELORA_SUPPORTED_CHAINS[1]);
+    }
+  }, [srcChain, destChain]);
 
   // Load bridge info on mount
   useEffect(() => {
@@ -95,6 +111,19 @@ export const SwapInterface: React.FC = () => {
       switchChain(srcChain.id);
     }
   }, [isConnected, srcChain, chainId, switchChain]);
+
+  const handleSrcChainSelect = useCallback((chain: Chain) => {
+    setSrcChain(chain);
+    // Clear tokens when chain changes
+    setSrcToken(null);
+    setDestToken(null);
+  }, []);
+
+  const handleDestChainSelect = useCallback((chain: Chain) => {
+    setDestChain(chain);
+    // Clear destination token when chain changes
+    setDestToken(null);
+  }, []);
 
   const handleSwapChains = () => {
     const tempChain = srcChain;
@@ -212,7 +241,7 @@ export const SwapInterface: React.FC = () => {
 
   // Check if current selection is valid for Delta protocol
   const isNativeSourceToken = srcToken && isNativeToken(srcToken);
-  const isValidSelection = srcToken && destToken && srcChain && destChain && amount && !isNativeSourceToken && !isLoadingTokens;
+  const isValidSelection = srcToken && destToken && srcChain && destChain && amount && !isNativeSourceToken && !isLoadingSrcTokens && !isLoadingDestTokens;
   const canExecuteSwap = isConnected && isValidSelection && quote;
 
   return (
@@ -261,7 +290,7 @@ export const SwapInterface: React.FC = () => {
 
 
         {/* Token Loading State */}
-        {isLoadingTokens && (
+        {(isLoadingSrcTokens || isLoadingDestTokens) && (
           <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
             <div className="flex items-center gap-2">
               <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
@@ -274,7 +303,7 @@ export const SwapInterface: React.FC = () => {
         )}
 
         {/* Token Loading Error */}
-        {tokenError && (
+        {(srcTokenError || destTokenError) && (
           <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
             <div className="flex items-center gap-2">
               <svg className="w-4 h-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -283,7 +312,7 @@ export const SwapInterface: React.FC = () => {
               <span className="text-sm font-medium text-yellow-800">Token Loading Warning</span>
             </div>
             <p className="text-sm text-yellow-700 mt-1">
-              {tokenError}. Using fallback token list.
+              {srcTokenError || destTokenError}. Using fallback token list.
             </p>
           </div>
         )}
@@ -308,19 +337,20 @@ export const SwapInterface: React.FC = () => {
           <div className="space-y-3">
             <ChainSelector
               selectedChain={srcChain}
-              onChainSelect={setSrcChain}
+              onChainSelect={handleSrcChainSelect}
               label="From Chain"
+              disabled={!isConnected}
             />
             <div className="flex gap-2">
               <div className="flex-1">
-                {isLoadingTokens ? (
+                {isLoadingSrcTokens ? (
                   <div className="flex items-center justify-center p-3 border border-gray-300 rounded-lg bg-gray-50">
                     <RefreshCw className="w-4 h-4 animate-spin mr-2" />
                     <span className="text-sm text-gray-600">Loading tokens...</span>
                   </div>
-                ) : tokenError ? (
+                ) : srcTokenError ? (
                   <div className="p-3 border border-red-200 rounded-lg bg-red-50">
-                    <p className="text-sm text-red-600">Failed to load tokens: {tokenError}</p>
+                    <p className="text-sm text-red-600">Failed to load tokens: {srcTokenError}</p>
                     <button
                       onClick={() => window.location.reload()}
                       className="mt-2 text-xs text-red-600 hover:text-red-800 underline"
@@ -335,7 +365,7 @@ export const SwapInterface: React.FC = () => {
                     chainId={srcChain?.id || null}
                     label="Token"
                     tokens={srcChainTokens}
-                    disabled={isLoadingTokens}
+                    disabled={isLoadingSrcTokens || !srcChain}
                   />
                 )}
               </div>
@@ -370,17 +400,18 @@ export const SwapInterface: React.FC = () => {
           <div className="space-y-3">
             <ChainSelector
               selectedChain={destChain}
-              onChainSelect={setDestChain}
+              onChainSelect={handleDestChainSelect}
               label="To Chain"
+              disabled={!isConnected}
             />
-            {isLoadingTokens ? (
+            {isLoadingDestTokens ? (
               <div className="flex items-center justify-center p-3 border border-gray-300 rounded-lg bg-gray-50">
                 <RefreshCw className="w-4 h-4 animate-spin mr-2" />
                 <span className="text-sm text-gray-600">Loading tokens...</span>
               </div>
-            ) : tokenError ? (
+            ) : destTokenError ? (
               <div className="p-3 border border-red-200 rounded-lg bg-red-50">
-                <p className="text-sm text-red-600">Failed to load tokens: {tokenError}</p>
+                <p className="text-sm text-red-600">Failed to load tokens: {destTokenError}</p>
                 <button
                   onClick={() => window.location.reload()}
                   className="mt-2 text-xs text-red-600 hover:text-red-800 underline"
@@ -395,7 +426,7 @@ export const SwapInterface: React.FC = () => {
                 chainId={destChain?.id || null}
                 label="Token"
                 tokens={destChainTokens}
-                disabled={isLoadingTokens}
+                disabled={isLoadingDestTokens || !destChain}
               />
             )}
           </div>
